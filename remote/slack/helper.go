@@ -445,27 +445,37 @@ func populateMessage(message models.Message, msgType models.MessageType, channel
 // readFromEventsAPI utilizes the Slack API client to read event-based messages.
 // This method of reading is preferred over the RTM method.
 func readFromEventsAPI(api *slack.Client, vToken string, inputMsgs chan<- models.Message, bot *models.Bot) {
-	// get the current users
-	users, err := api.GetUsers()
-	if err != nil {
-		log.Error().Msgf("error getting users: %v", err)
-	}
+	// go grab the users and user groups async
+	go func(b *models.Bot) {
+		log.Debug().Msg("fetching all users in workspace - this might take a while on large workspaces")
 
-	// add users to the bot
-	if users != nil {
-		populateUsers(users, bot)
-	}
+		// get the current users
+		users, err := api.GetUsers()
+		if err != nil {
+			log.Error().Msgf("error getting users: %v", err)
+		}
 
-	// get the user groups
-	usergroups, err := api.GetUserGroups()
-	if err != nil {
-		log.Error().Msgf("error getting user groups: %v", err)
-	}
+		// add users to the bot
+		if users != nil {
+			log.Debug().Msg("adding fetched users to cache")
 
-	// add user groups to the bot
-	if usergroups != nil {
-		populateUserGroups(usergroups, bot)
-	}
+			populateUsers(users, b)
+		}
+
+		log.Debug().Msg("fetching all user groups in workspace - this might take a while on large workspaces")
+		// get the user groups
+		usergroups, err := api.GetUserGroups()
+		if err != nil {
+			log.Error().Msgf("error getting user groups: %v", err)
+		}
+
+		// add user groups to the bot
+		if usergroups != nil {
+			log.Debug().Msg("adding fetched user groups to cache")
+
+			populateUserGroups(usergroups, b)
+		}
+	}(bot)
 
 	// Create router for the events server
 	router := mux.NewRouter()
@@ -600,27 +610,36 @@ func readFromSocketMode(sm *slack.Client, inputMsgs chan<- models.Message, bot *
 			case socketmode.EventTypeConnected:
 				log.Info().Msg("connected to slack with socket mode")
 
-				// get users
-				users, err := sm.GetUsers()
-				if err != nil {
-					log.Error().Msgf("unable to get users: %v", err)
-				}
+				// go grab the users and usergroups async
+				go func(b *models.Bot) {
+					log.Debug().Msg("fetching all users in workspace - this might take a while on large workspaces")
 
-				// add users to bot
-				if users != nil {
-					populateUsers(users, bot)
-				}
+					users, err := sm.GetUsers()
+					if err != nil {
+						log.Error().Msgf("unable to get users: %v", err)
+					}
 
-				// get user groups
-				usergroups, err := sm.GetUserGroups()
-				if err != nil {
-					log.Error().Msgf("unable to get user groups: %v", err)
-				}
+					// add users to bot
+					if users != nil {
+						log.Debug().Msg("adding fetched users to cache")
 
-				// add user groups to bot
-				if usergroups != nil {
-					populateUserGroups(usergroups, bot)
-				}
+						populateUsers(users, b)
+					}
+
+					log.Debug().Msg("fetching all user groups in workspace - this might take a while on large workspaces")
+
+					usergroups, err := sm.GetUserGroups()
+					if err != nil {
+						log.Error().Msgf("unable to get user groups: %v", err)
+					}
+
+					// add user groups to bot
+					if usergroups != nil {
+						log.Debug().Msg("adding fetched user groups to cache")
+
+						populateUserGroups(usergroups, b)
+					}
+				}(bot)
 			default:
 				log.Warn().Msgf("unhandled event type received: %s", evt.Type)
 			}
